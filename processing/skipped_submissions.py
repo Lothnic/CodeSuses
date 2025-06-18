@@ -1,25 +1,49 @@
 import requests
 import pandas as pd
+import time
 
-# Define the handle and verdict you want to filter by
-target_verdict = "SKIPPED"  # The verdict we're looking for
+target_verdict = "SKIPPED"
 
-df = pd.read_csv('data/filtered_users.csv')
+df = pd.read_csv('filtered_users.csv')
+
+if 'cheating' not in df.columns:
+    df['cheating'] = False
+
 handles = df['handle'].tolist()
+total = len(handles)
 
-# cheating_handles = list()
-i=0
-for handle in handles:
-    response = requests.get(f"https://codeforces.com/api/user.status?handle={handle}&from=1&count=1000")
-    data = response.json()
-    i+=1
-    if data['status'] == 'OK':
+for i, handle in enumerate(handles):
+    success = False
+
+    for attempt in range(3):
+        try:
+            response = requests.get(
+                f"https://codeforces.com/api/user.status?handle={handle}&from=1&count=1000",
+            )
+            response.raise_for_status()
+            try:
+                data = response.json()
+                success = True
+                break
+            except requests.exceptions.JSONDecodeError:
+                print(f"JSON decode failed for handle {handle}")
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed for {handle} on attempt {attempt+1}: {e}")
+            time.sleep(1)
+
+    if not success:
+        print(f"Skipping handle {handle} after 3 failed attempts.")
+        continue
+
+    if data.get('status') == 'OK':
         has_skipped = any(sub.get('verdict') == target_verdict for sub in data['result'])
+        df.loc[df['handle'] == handle, 'cheating'] = has_skipped
         if has_skipped:
-            # cheating_handles.append(handle)
-            df.loc[df['handle'] == handle, 'cheating'] = True
-            print(f"Marked {handle} handle as cheating. {i/35612*100}%")
-        else:
-            df.loc[df['handle'] == handle, 'cheating'] = False
+            print(f"Marked {handle} as cheating. {i/total*100}% done.")
+    else:
+        print(f"API returned non-OK for {handle}: {data}")
 
-df.to_csv('data/enhanced_filtered_users.csv', index=False)
+    time.sleep(0.01)
+
+df.to_csv('enhanced_filtered_users.csv', index=False)
+print("✅ All done! Saved to enhanced_filtered_users.csv")
